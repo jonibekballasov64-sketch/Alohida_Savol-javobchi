@@ -4,10 +4,13 @@ const levenshtein = require('fast-levenshtein');
 const NUMBER_WORDS = {
   nol: 0, bir: 1, ikki: 2, uch: 3, tort: 4, "to'rt": 4, besh: 5, olti: 6,
   yetti: 7, sakkiz: 8, toqqiz: 9, "to'qqiz": 9,
-  on: 10, yigirma: 20, ottiz: 30, "o'ttiz": 30, qirq: 40, ellik: 50,
+  on: 10, "o'n": 10, yigirma: 20, ottiz: 30, "o'ttiz": 30, qirq: 40, ellik: 50,
   oltmish: 60, yetmish: 70, sakson: 80, toqson: 90, "to'qson": 90,
   yuz: 100, ming: 1000,
 };
+
+// Mazmun bermaydigan bog'lovchi so'zlar - alohida so'z sifatida tekshirilmaydi
+const STOPWORDS = new Set(['va', 'bilan', 'uchun', 'ham', 'lekin', 'biroq', 'yoki', 'deb', 'kabi']);
 
 function wordsToNumber(text) {
   const words = text.split(/\s+/).filter(Boolean);
@@ -67,11 +70,13 @@ function similarityOk(a, b) {
 
 /**
  * O'quvchi javobi bilan to'g'ri javobni imloviy xatolarga chidamli solishtiradi.
- * Bir nechta to'g'ri javob variantlari "/" yoki "," bilan berilgan bo'lsa,
- * har biriga alohida tekshiradi.
+ * - Bir nechta to'g'ri javob variantlari "/" yoki "," bilan berilgan bo'lsa, har biriga tekshiradi.
+ * - To'g'ri javob bir nechta so'zdan iborat bo'lsa (masalan "Mavzu va pozitsiya"),
+ *   o'quvchi shu so'zlardan FAQAT BITTASINI yozsa ham to'g'ri deb hisoblanadi.
  */
 function isAnswerCorrect(studentRaw, correctRaw) {
   const studentNorm = normalizeNumbers(normalize(studentRaw));
+  if (!studentNorm) return false;
 
   const variants = String(correctRaw)
     .split(/[\/,]|;| yoki /i)
@@ -79,10 +84,20 @@ function isAnswerCorrect(studentRaw, correctRaw) {
     .filter(Boolean);
   if (variants.length === 0) variants.push(correctRaw);
 
-  return variants.some((variant) => {
+  for (const variant of variants) {
     const correctNorm = normalizeNumbers(normalize(variant));
-    return similarityOk(studentNorm, correctNorm);
-  });
+
+    // 1) To'liq javob solishtiruvi
+    if (similarityOk(studentNorm, correctNorm)) return true;
+
+    // 2) So'z darajasida solishtiruv - bitta muhim so'z to'g'ri kelsa yetarli
+    const words = correctNorm.split(' ').filter((w) => w.length > 1 && !STOPWORDS.has(w));
+    for (const word of words) {
+      if (similarityOk(studentNorm, word)) return true;
+    }
+  }
+
+  return false;
 }
 
 module.exports = { isAnswerCorrect, normalize };
