@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   code TEXT NOT NULL,
   student_tg_id BIGINT NOT NULL,
   student_name TEXT NOT NULL,
+  tg_profile_name TEXT,
+  tg_username TEXT,
   attempt_number INTEGER NOT NULL DEFAULT 1,
   current_index INTEGER NOT NULL DEFAULT 0,
   correct_count INTEGER NOT NULL DEFAULT 0,
