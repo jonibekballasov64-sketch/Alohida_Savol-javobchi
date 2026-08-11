@@ -88,7 +88,16 @@ async function finishSession(bot, session) {
   );
 
   if (session.attempt_number === 1) {
-    const line = `📊 Hisobot\nKod: ${session.code}\nMavzu: ${topic.name}\nO'quvchi: ${session.student_name}\nNatija: ${session.correct_count}/${total} (${percent}%)`;
+    const usernamePart = session.tg_username ? `@${session.tg_username}` : "(username yo'q)";
+    const line =
+      `📊 Hisobot\n` +
+      `Kod: ${session.code}\n` +
+      `Mavzu: ${topic.name}\n` +
+      `Kiritgan ism: ${session.student_name}\n` +
+      `Profil ismi: ${session.tg_profile_name || '-'}\n` +
+      `Username: ${usernamePart}\n` +
+      `Telegram ID: ${session.student_tg_id}\n` +
+      `Natija: ${session.correct_count}/${total} (${percent}%)`;
     for (const adminId of ADMIN_IDS) {
       bot.telegram.sendMessage(adminId, line).catch(() => {});
     }
@@ -137,8 +146,7 @@ function registerStudentHandlers(bot) {
       );
     }
 
-    const name = studentDisplayName(ctx.from);
-    await ctx.reply(`Assalomu alaykum🖐 ${name}\n\nMen Nargiza Olimovnaning yordamchisiman.`);
+    await ctx.reply(`Assalomu alaykum🖐\n\nMen Nargiza Olimovnaning yordamchisiman.`);
     await ctx.reply(
       "Bugun siz bilan maxsus videodars asosida savol-javob qilaman. Buning uchun 6 xonali savol-javob kodini kiriting. Bu kod guruhga berilgan bo'lishi kerak.\n\nHozir faqat 6 ta belgili kod yuboring, ortiqcha narsalar yozmang."
     );
@@ -177,7 +185,7 @@ function registerStudentHandlers(bot) {
     const state = studentStates.get(ctx.from.id);
     const text = ctx.message.text.trim();
 
-    // Kod kutilayotgan holat
+    // 1) Kod kutilayotgan holat
     if (state && state.step === 'awaiting_code') {
       const code = text.toUpperCase().replace(/\s+/g, '');
       if (!/^[A-Z0-9]{6}$/.test(code)) {
@@ -199,23 +207,45 @@ function registerStudentHandlers(bot) {
         return ctx.reply(`Siz ushbu kod bilan ${MAX_ATTEMPTS} marta urinish huquqingizni ishlatib bo'lgansiz.`);
       }
 
-      const name = studentDisplayName(ctx.from);
+      studentStates.set(ctx.from.id, {
+        step: 'awaiting_name',
+        topicId: topic.id,
+        code,
+        attemptNumber: attemptsUsed + 1,
+        tgProfileName: studentDisplayName(ctx.from),
+        tgUsername: ctx.from.username || null,
+      });
+
+      await ctx.reply("Kod qabul qilindi ✅️\n\nIsm-familyangizni to'liq kiriting:");
+      return;
+    }
+
+    // 2) Ism-familya kutilayotgan holat
+    if (state && state.step === 'awaiting_name') {
+      const fullName = text.trim();
+      if (fullName.length < 2) {
+        return ctx.reply("Iltimos, ism-familyangizni to'liq kiriting:");
+      }
+
+      const topicRes = await query('SELECT * FROM topics WHERE id=$1', [state.topicId]);
+      const topic = topicRes.rows[0];
+
       const insertRes = await query(
-        `INSERT INTO sessions (topic_id, code, student_tg_id, student_name, attempt_number, status)
-         VALUES ($1,$2,$3,$4,$5,'pending') RETURNING id`,
-        [topic.id, code, ctx.from.id, name, attemptsUsed + 1]
+        `INSERT INTO sessions (topic_id, code, student_tg_id, student_name, tg_profile_name, tg_username, attempt_number, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING id`,
+        [topic.id, state.code, ctx.from.id, fullName, state.tgProfileName, state.tgUsername, state.attemptNumber]
       );
       const sessionId = insertRes.rows[0].id;
       studentStates.delete(ctx.from.id);
 
       await ctx.reply(
-        `Kod qabul qilindi. MAVZU: ${topic.name}\n\n⚠️D I Q Q A T bitta mavzuda ${MAX_ATTEMPTS} marta qayta-qayta savol-javob qilishimiz mumkin. Lekin faqat birinchi natija haqiqiy hisoblanadi va Nargiza ustozlarga ko'rinadi.`,
+        `Rahmat, ${fullName}!\n\nMAVZU: ${topic.name}\n\n⚠️D I Q Q A T bitta mavzuda ${MAX_ATTEMPTS} marta qayta-qayta savol-javob qilishimiz mumkin. Lekin faqat birinchi natija haqiqiy hisoblanadi va Nargiza ustozlarga ko'rinadi.`,
         Markup.inlineKeyboard([[Markup.button.callback('▶️ Boshlash', `start_quiz_${sessionId}`)]])
       );
       return;
     }
 
-    // Aktiv sessiyada javob kutilyapti
+    // 3) Aktiv sessiyada javob kutilyapti
     const activeRes = await query(
       "SELECT * FROM sessions WHERE student_tg_id=$1 AND status='active' ORDER BY id DESC LIMIT 1",
       [ctx.from.id]
