@@ -11,7 +11,6 @@ function studentDisplayName(from) {
   return [from.first_name, from.last_name].filter(Boolean).join(' ') || from.username || 'O\'quvchi';
 }
 
-// Telegram Markdown'ni buzmasligi uchun dinamik matnlarni xavfsizlashtirish
 function escapeMd(text) {
   return String(text || '').replace(/([_*`[\]])/g, '\\$1');
 }
@@ -46,11 +45,7 @@ async function sendQuestion(bot, session) {
   }
   const question = qRes.rows[0];
   await query('UPDATE sessions SET last_question_at=now() WHERE id=$1', [session.id]);
-  await bot.telegram.sendMessage(
-    session.student_tg_id,
-    `⁉️ *${escapeMd(question.question)}*`,
-    MD
-  );
+  await bot.telegram.sendMessage(session.student_tg_id, `⁉️ *${escapeMd(question.question)}*`, MD);
   scheduleTimeouts(bot, session.id);
 }
 
@@ -192,11 +187,12 @@ function registerStudentHandlers(bot) {
     }
 
     await ctx.reply(`Assalomu alaykum🖐\n\nMen *Nargiza Olimovnaning* yordamchisiman.`, MD);
-    await ctx.reply(
-      "Bugun siz bilan maxsus videodars asosida savol-javob qilaman. Buning uchun *6 xonali savol-javob kodini* kiriting. Bu kod guruhga berilgan bo'lishi kerak.\n\n_Hozir faqat 6 ta belgili kod yuboring, ortiqcha narsalar yozmang._",
-      MD
-    );
-    studentStates.set(ctx.from.id, { step: 'awaiting_code' });
+    await ctx.reply("Boshlashdan oldin *ism-familyangizni* to'liq kiriting:", MD);
+    studentStates.set(ctx.from.id, {
+      step: 'awaiting_name',
+      tgProfileName: studentDisplayName(ctx.from),
+      tgUsername: ctx.from.username || null,
+    });
   });
 
   bot.action(/continue_(\d+)/, async (ctx) => {
@@ -231,7 +227,23 @@ function registerStudentHandlers(bot) {
     const state = studentStates.get(ctx.from.id);
     const text = ctx.message.text.trim();
 
-    // 1) Kod kutilayotgan holat
+    // 1) Ism-familya kutilayotgan holat (endi birinchi so'raladi)
+    if (state && state.step === 'awaiting_name') {
+      const fullName = text.trim();
+      if (fullName.length < 2) {
+        return ctx.reply("Iltimos, ism-familyangizni to'liq kiriting:");
+      }
+      studentStates.set(ctx.from.id, { ...state, step: 'awaiting_code', fullName });
+      await ctx.reply(
+        `Rahmat, *${escapeMd(fullName)}*!\n\n` +
+          `Endi *6 xonali savol-javob kodini* kiriting. Bu kod guruhga berilgan bo'lishi kerak.\n\n` +
+          `_Hozir faqat 6 ta belgili kod yuboring, ortiqcha narsalar yozmang._`,
+        MD
+      );
+      return;
+    }
+
+    // 2) Kod kutilayotgan holat
     if (state && state.step === 'awaiting_code') {
       const code = text.toUpperCase().replace(/\s+/g, '');
       if (!/^[A-Z0-9]{6}$/.test(code)) {
@@ -253,39 +265,16 @@ function registerStudentHandlers(bot) {
         return ctx.reply(`Siz ushbu kod bilan ${MAX_ATTEMPTS} marta urinish huquqingizni ishlatib bo'lgansiz.`);
       }
 
-      studentStates.set(ctx.from.id, {
-        step: 'awaiting_name',
-        topicId: topic.id,
-        code,
-        attemptNumber: attemptsUsed + 1,
-        tgProfileName: studentDisplayName(ctx.from),
-        tgUsername: ctx.from.username || null,
-      });
-
-      await ctx.reply("Kod qabul qilindi ✅️\n\n*Ism-familyangizni* to'liq kiriting:", MD);
-      return;
-    }
-
-    // 2) Ism-familya kutilayotgan holat
-    if (state && state.step === 'awaiting_name') {
-      const fullName = text.trim();
-      if (fullName.length < 2) {
-        return ctx.reply("Iltimos, ism-familyangizni to'liq kiriting:");
-      }
-
-      const topicRes = await query('SELECT * FROM topics WHERE id=$1', [state.topicId]);
-      const topic = topicRes.rows[0];
-
       const insertRes = await query(
         `INSERT INTO sessions (topic_id, code, student_tg_id, student_name, tg_profile_name, tg_username, attempt_number, status)
          VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING id`,
-        [topic.id, state.code, ctx.from.id, fullName, state.tgProfileName, state.tgUsername, state.attemptNumber]
+        [topic.id, code, ctx.from.id, state.fullName, state.tgProfileName, state.tgUsername, attemptsUsed + 1]
       );
       const sessionId = insertRes.rows[0].id;
       studentStates.delete(ctx.from.id);
 
       await ctx.reply(
-        `Rahmat, *${escapeMd(fullName)}*!\n\n` +
+        `Kod qabul qilindi ✅️\n\n` +
           `MAVZU: *${escapeMd(topic.name)}*\n\n` +
           `⚠️ _D I Q Q A T_ bitta mavzuda ${MAX_ATTEMPTS} marta qayta-qayta savol-javob qilishimiz mumkin. Lekin faqat birinchi natija haqiqiy hisoblanadi va Nargiza ustozlarga ko'rinadi.`,
         { ...MD, ...Markup.inlineKeyboard([[Markup.button.callback('▶️ Boshlash', `start_quiz_${sessionId}`)]]) }
@@ -301,6 +290,34 @@ function registerStudentHandlers(bot) {
     if (activeRes.rowCount > 0) {
       const session = activeRes.rows[0];
       await processAnswer(bot, session, text);
+      return;
+    }
+
+    // 4) "Boshlash" tugmasi bosilishini kutayotgan holat
+    const pendingRes = await query(
+      "SELECT * FROM sessions WHERE student_tg_id=$1 AND status='pending' ORDER BY id DESC LIMIT 1",
+      [ctx.from.id]
+    );
+    if (pendingRes.rowCount > 0) {
+      const session = pendingRes.rows[0];
+      await ctx.reply(
+        "Savol-javobni boshlash uchun yuqoridagi *▶️ Boshlash* tugmasini bosing.",
+        { ...MD, ...Markup.inlineKeyboard([[Markup.button.callback('▶️ Boshlash', `start_quiz_${session.id}`)]]) }
+      );
+      return;
+    }
+
+    // 5) Paused holatda (vaqt tugagan) bo'lsa ham eslatma
+    const pausedRes = await query(
+      "SELECT * FROM sessions WHERE student_tg_id=$1 AND status='paused' ORDER BY id DESC LIMIT 1",
+      [ctx.from.id]
+    );
+    if (pausedRes.rowCount > 0) {
+      const session = pausedRes.rows[0];
+      await ctx.reply(
+        "Davom etish uchun yuqoridagi *▶️ Davom ettirish* tugmasini bosing.",
+        { ...MD, ...Markup.inlineKeyboard([[Markup.button.callback('▶️ Davom ettirish', `continue_${session.id}`)]]) }
+      );
       return;
     }
 
