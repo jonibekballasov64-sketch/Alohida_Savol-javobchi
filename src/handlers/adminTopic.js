@@ -3,7 +3,7 @@ const { query } = require('../db');
 const { adminStates } = require('../state');
 const { generateUniqueCode } = require('../utils/codeGen');
 
-// Xabar ichidan ⁉️/✅️ juftliklarini ajratib olish
+// Xabar ichidan ⁉️/✅️/⚠️ juftliklarini ajratib olish
 function parseQuestions(text) {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   const pairs = [];
@@ -15,8 +15,13 @@ function parseQuestions(text) {
     } else if (line.startsWith('✅️') || line.startsWith('✅')) {
       if (currentQ) {
         const answer = line.replace(/^✅️|^✅/, '').trim();
-        pairs.push({ question: currentQ, answer });
+        pairs.push({ question: currentQ, answer, explanation: null });
         currentQ = null;
+      }
+    } else if (line.startsWith('⚠️')) {
+      if (pairs.length > 0) {
+        const explanation = line.replace(/^⚠️\s*(izoh\s*:\s*)?/i, '').trim();
+        pairs[pairs.length - 1].explanation = explanation || null;
       }
     }
   }
@@ -45,7 +50,6 @@ function registerAdminTopicHandlers(bot, isAdminFn) {
     await ctx.reply('Tahrirlamoqchi bo\'lgan mavzuning slug\'ini kiriting:');
   });
 
-  // Matnli xabarlarni FSM bosqichlariga qarab qayta ishlash
   bot.on('text', async (ctx, next) => {
     if (!isAdminFn(ctx.from.id)) return next();
     const state = adminStates.get(ctx.from.id);
@@ -71,7 +75,7 @@ function registerAdminTopicHandlers(bot, isAdminFn) {
       const topicId = res.rows[0].id;
       adminStates.set(ctx.from.id, { step: 'awaiting_questions', topicId });
       await ctx.reply(
-        `Mavzu yaratildi: "${name}"\n\nEndi savollarni shu formatda yuboring (bitta xabarda bir nechtasi bo'lishi mumkin):\n\n⁉️ Savol matni\n✅️ Javob matni\n\n⁉️ Yana savol\n✅️ Yana javob`
+        `Mavzu yaratildi: "${name}"\n\nEndi savollarni shu formatda yuboring (bitta xabarda bir nechtasi bo'lishi mumkin, izoh ixtiyoriy):\n\n⁉️ Savol matni\n✅️ Javob matni\n⚠️ Izoh: qo'shimcha tushuntirish (ixtiyoriy)\n\n⁉️ Yana savol\n✅️ Yana javob`
       );
       return;
     }
@@ -88,8 +92,8 @@ function registerAdminTopicHandlers(bot, isAdminFn) {
       for (const p of pairs) {
         orderIndex += 1;
         await query(
-          'INSERT INTO questions (topic_id, order_index, question, answer) VALUES ($1,$2,$3,$4)',
-          [state.topicId, orderIndex, p.question, p.answer]
+          'INSERT INTO questions (topic_id, order_index, question, answer, explanation) VALUES ($1,$2,$3,$4,$5)',
+          [state.topicId, orderIndex, p.question, p.answer, p.explanation]
         );
       }
       await ctx.reply(
@@ -107,7 +111,7 @@ function registerAdminTopicHandlers(bot, isAdminFn) {
       const topic = topicRes.rows[0];
       adminStates.set(ctx.from.id, { step: 'awaiting_questions', topicId: topic.id });
       await ctx.reply(
-        `Mavzu topildi: "${topic.name}" (kod: ${topic.finalized ? topic.code : 'hali yakunlanmagan'})\n\nQo'shimcha savollarni yuboring:\n\n⁉️ Savol matni\n✅️ Javob matni`
+        `Mavzu topildi: "${topic.name}" (kod: ${topic.finalized ? topic.code : 'hali yakunlanmagan'})\n\nQo'shimcha savollarni yuboring:\n\n⁉️ Savol matni\n✅️ Javob matni\n⚠️ Izoh: qo'shimcha tushuntirish (ixtiyoriy)`
       );
       return;
     }
