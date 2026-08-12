@@ -5,6 +5,7 @@ const { initSchema } = require('./db');
 const { registerAdminTopicHandlers } = require('./handlers/adminTopic');
 const { registerAdminListHandler } = require('./handlers/adminList');
 const { registerAdminReportHandler } = require('./handlers/adminReport');
+const { registerAdminRoundReportHandlers } = require('./handlers/adminRoundReport');
 const { registerStudentHandlers } = require('./handlers/studentFlow');
 
 if (!BOT_TOKEN) {
@@ -16,6 +17,7 @@ const bot = new Telegraf(BOT_TOKEN);
 
 // Admin buyruqlari
 registerAdminReportHandler(bot, isAdmin); // /hisobot_KOD - bot.hears bilan ishlagani uchun oldinroq
+registerAdminRoundReportHandlers(bot, isAdmin); // /joriyhisobot_KOD, /yakunlash_KOD
 registerAdminTopicHandlers(bot, isAdmin); // /yangi_mavzu, /tahrirlash
 registerAdminListHandler(bot, isAdmin); // /mavzular
 
