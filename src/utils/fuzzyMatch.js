@@ -1,6 +1,6 @@
 const levenshtein = require('fast-levenshtein');
 
-// So'z shaklidagi sonlarni raqamga o'giradigan lug'at (eng ko'p ishlatiladiganlari)
+// So'z shaklidagi sonlarni raqamga o'giradigan lug'at
 const NUMBER_WORDS = {
   nol: 0, bir: 1, ikki: 2, uch: 3, tort: 4, "to'rt": 4, besh: 5, olti: 6,
   yetti: 7, sakkiz: 8, toqqiz: 9, "to'qqiz": 9,
@@ -9,8 +9,24 @@ const NUMBER_WORDS = {
   yuz: 100, ming: 1000,
 };
 
-// Mazmun bermaydigan bog'lovchi so'zlar - alohida so'z sifatida tekshirilmaydi
-const STOPWORDS = new Set(['va', 'bilan', 'uchun', 'ham', 'lekin', 'biroq', 'yoki', 'deb', 'kabi']);
+// Mazmun bermaydigan bog'lovchi so'zlar
+const STOPWORDS = new Set(['va', 'bilan', 'uchun', 'ham', 'lekin', 'biroq', 'yoki', 'deb', 'kabi', 'bir']);
+
+// Keng tarqalgan kelishik/egalik qo'shimchalari
+const SUFFIXES = [
+  'lariniki', 'larining', 'laridan', 'larida', 'larini', 'lariga', 'larni',
+  'ning', 'dagi', 'gacha', 'cha', 'lar', 'dan', 'da', 'ga', 'ni',
+];
+
+function stripSuffix(word) {
+  if (word.length <= 4) return word;
+  for (const suf of SUFFIXES) {
+    if (word.endsWith(suf) && word.length - suf.length >= 3) {
+      return word.slice(0, word.length - suf.length);
+    }
+  }
+  return word;
+}
 
 function wordsToNumber(text) {
   const words = text.split(/\s+/).filter(Boolean);
@@ -34,19 +50,16 @@ function wordsToNumber(text) {
 function normalize(raw) {
   let s = String(raw || '').toLowerCase().trim();
 
-  // apostrof variantlari -> '
+  // apostrof va tirnoq (oddiy + qiya) variantlari
   s = s.replace(/[\u2018\u2019\u0060\u00B4\u02BB\u02BC`’‘ʻʼ]/g, "'");
-
-  // o‘ / oʻ / òo va shu kabi variantlar -> o'
   s = s.replace(/o['`´]/g, "o'").replace(/ò/g, "o'");
-  // g‘ / ģ / g` -> g'
   s = s.replace(/g['`´]/g, "g'").replace(/ģ/g, "g'");
 
   // tire/chiziqcha variantlari -> bo'shliq
   s = s.replace(/[\u2010-\u2015\-–—]/g, ' ');
 
-  // ortiqcha bo'shliqlar va tinish belgilari
-  s = s.replace(/[.,!?;:()"]/g, ' ');
+  // ortiqcha bo'shliqlar va tinish belgilari (qiya/burama tirnoqlar ham)
+  s = s.replace(/[.,!?;:()"“”«»]/g, ' ');
   s = s.replace(/\s+/g, ' ').trim();
 
   return s;
@@ -62,38 +75,67 @@ function similarityOk(a, b) {
   const maxLen = Math.max(a.length, b.length);
   if (maxLen === 0) return true;
   const dist = levenshtein.get(a, b);
-  // qisqa javoblar uchun qattiqroq, uzun javoblar uchun yumshoqroq chegara
-  const allowedRatio = maxLen <= 4 ? 0.34 : maxLen <= 8 ? 0.4 : 0.3;
+  const allowedRatio = maxLen <= 4 ? 0.34 : maxLen <= 8 ? 0.4 : 0.35;
   const allowedDistance = Math.max(1, Math.round(maxLen * allowedRatio));
-  return dist <= allowedDistance;
+  if (dist <= allowedDistance) return true;
+
+  const aStripped = stripSuffix(a);
+  const bStripped = stripSuffix(b);
+  if (aStripped !== a || bStripped !== b) {
+    const maxLen2 = Math.max(aStripped.length, bStripped.length);
+    if (maxLen2 === 0) return false;
+    const dist2 = levenshtein.get(aStripped, bStripped);
+    const allowedDistance2 = Math.max(1, Math.round(maxLen2 * allowedRatio));
+    if (dist2 <= allowedDistance2) return true;
+  }
+
+  return false;
+}
+
+function meaningfulWords(normText) {
+  return normText.split(' ').filter((w) => w.length > 1 && !STOPWORDS.has(w));
+}
+
+/**
+ * To'g'ri javobni variantlarga ajratish: "/", ",", ";" yoki "yoki" so'zi bo'yicha.
+ * "yoki" so'z chegarasi (\b) orqali qidiriladi - qavs yoki tinish belgisi
+ * bilan yonma-yon bo'lsa ham ("(yoki") to'g'ri ajratiladi.
+ */
+function splitVariants(correctRaw) {
+  const variants = String(correctRaw)
+    .split(/[\/,;]|\byoki\b/i)
+    .map((v) => v.trim())
+    .filter(Boolean);
+  return variants.length > 0 ? variants : [correctRaw];
 }
 
 /**
  * O'quvchi javobi bilan to'g'ri javobni imloviy xatolarga chidamli solishtiradi.
- * - Bir nechta to'g'ri javob variantlari "/" yoki "," bilan berilgan bo'lsa, har biriga tekshiradi.
- * - To'g'ri javob bir nechta so'zdan iborat bo'lsa (masalan "Mavzu va pozitsiya"),
- *   o'quvchi shu so'zlardan FAQAT BITTASINI yozsa ham to'g'ri deb hisoblanadi.
  */
 function isAnswerCorrect(studentRaw, correctRaw) {
   const studentNorm = normalizeNumbers(normalize(studentRaw));
   if (!studentNorm) return false;
 
-  const variants = String(correctRaw)
-    .split(/[\/,]|;| yoki /i)
-    .map((v) => v.trim())
-    .filter(Boolean);
-  if (variants.length === 0) variants.push(correctRaw);
+  const variants = splitVariants(correctRaw);
+
+  const studentWords = meaningfulWords(studentNorm);
+  if (studentWords.length === 0) studentWords.push(studentNorm);
 
   for (const variant of variants) {
     const correctNorm = normalizeNumbers(normalize(variant));
+    if (!correctNorm) continue;
 
-    // 1) To'liq javob solishtiruvi
+    // 1) To'liq javoblarni solishtirish
     if (similarityOk(studentNorm, correctNorm)) return true;
 
-    // 2) So'z darajasida solishtiruv - bitta muhim so'z to'g'ri kelsa yetarli
-    const words = correctNorm.split(' ').filter((w) => w.length > 1 && !STOPWORDS.has(w));
-    for (const word of words) {
-      if (similarityOk(studentNorm, word)) return true;
+    // 2) So'z darajasida solishtiruv
+    const correctWords = meaningfulWords(correctNorm);
+    if (correctWords.length === 0) correctWords.push(correctNorm);
+
+    for (const cWord of correctWords) {
+      for (const sWord of studentWords) {
+        if (similarityOk(sWord, cWord)) return true;
+      }
     }
   }
 
