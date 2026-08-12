@@ -246,8 +246,8 @@ function registerStudentHandlers(bot) {
       const topic = topicRes.rows[0];
 
       const attemptsRes = await query(
-        'SELECT COUNT(*) FROM sessions WHERE code=$1 AND student_tg_id=$2',
-        [code, ctx.from.id]
+        'SELECT COUNT(*) FROM sessions WHERE code=$1 AND student_tg_id=$2 AND round=$3',
+        [code, ctx.from.id, topic.round]
       );
       const attemptsUsed = Number(attemptsRes.rows[0].count);
       if (attemptsUsed >= MAX_ATTEMPTS) {
@@ -256,9 +256,9 @@ function registerStudentHandlers(bot) {
 
       const name = studentDisplayName(ctx.from);
       const insertRes = await query(
-        `INSERT INTO sessions (topic_id, code, student_tg_id, student_name, tg_profile_name, tg_username, attempt_number, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING id`,
-        [topic.id, code, ctx.from.id, name, name, ctx.from.username || null, attemptsUsed + 1]
+        `INSERT INTO sessions (topic_id, code, student_tg_id, student_name, tg_profile_name, tg_username, attempt_number, status, round)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8) RETURNING id`,
+        [topic.id, code, ctx.from.id, name, name, ctx.from.username || null, attemptsUsed + 1, topic.round]
       );
       const sessionId = insertRes.rows[0].id;
       studentStates.delete(ctx.from.id);
