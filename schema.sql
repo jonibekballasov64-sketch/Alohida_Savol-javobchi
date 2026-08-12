@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS topics (
   code TEXT UNIQUE NOT NULL,
   admin_id BIGINT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  finalized BOOLEAN NOT NULL DEFAULT false
+  finalized BOOLEAN NOT NULL DEFAULT false,
+  round INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS questions (
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   correct_count INTEGER NOT NULL DEFAULT 0,
   wrong_count INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active', -- active | paused | finished
+  round INTEGER NOT NULL DEFAULT 1,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   finished_at TIMESTAMPTZ,
   last_question_at TIMESTAMPTZ
