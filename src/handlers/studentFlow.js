@@ -125,7 +125,8 @@ async function finishSession(bot, session) {
       `📊 Hisobot\n` +
       `Kod: ${session.code}\n` +
       `Mavzu: ${topic.name}\n` +
-      `Ism: ${session.student_name}\n` +
+      `Kiritgan ism: ${session.student_name}\n` +
+      `Profil ismi: ${session.tg_profile_name || '-'}\n` +
       `Username: ${usernamePart}\n` +
       `Telegram ID: ${session.student_tg_id}\n` +
       `Natija: ${session.correct_count}/${total} (${percent}%)`;
@@ -186,11 +187,12 @@ function registerStudentHandlers(bot) {
     }
 
     await ctx.reply(`Assalomu alaykum🖐\n\nMen *Nargiza Olimovnaning* yordamchisiman.`, MD);
-    await ctx.reply(
-      "Bugun siz bilan maxsus videodars asosida savol-javob qilaman. Buning uchun *6 xonali savol-javob kodini* kiriting. Bu kod guruhga berilgan bo'lishi kerak.\n\n_Hozir faqat 6 ta belgili kod yuboring, ortiqcha narsalar yozmang._",
-      MD
-    );
-    studentStates.set(ctx.from.id, { step: 'awaiting_code' });
+    await ctx.reply("Boshlashdan oldin *ism-familyangizni* to'liq kiriting:", MD);
+    studentStates.set(ctx.from.id, {
+      step: 'awaiting_name',
+      tgProfileName: studentDisplayName(ctx.from),
+      tgUsername: ctx.from.username || null,
+    });
   });
 
   bot.action(/continue_(\d+)/, async (ctx) => {
@@ -225,7 +227,23 @@ function registerStudentHandlers(bot) {
     const state = studentStates.get(ctx.from.id);
     const text = ctx.message.text.trim();
 
-    // 1) Kod kutilayotgan holat
+    // 1) Ism-familya kutilayotgan holat (endi birinchi so'raladi)
+    if (state && state.step === 'awaiting_name') {
+      const fullName = text.trim();
+      if (fullName.length < 2) {
+        return ctx.reply("Iltimos, ism-familyangizni to'liq kiriting:");
+      }
+      studentStates.set(ctx.from.id, { ...state, step: 'awaiting_code', fullName });
+      await ctx.reply(
+        `Rahmat, *${escapeMd(fullName)}*!\n\n` +
+          `Endi *6 xonali savol-javob kodini* kiriting. Bu kod guruhga berilgan bo'lishi kerak.\n\n` +
+          `_Hozir faqat 6 ta belgili kod yuboring, ortiqcha narsalar yozmang._`,
+        MD
+      );
+      return;
+    }
+
+    // 2) Kod kutilayotgan holat
     if (state && state.step === 'awaiting_code') {
       const code = text.toUpperCase().replace(/\s+/g, '');
       if (!/^[A-Z0-9]{6}$/.test(code)) {
@@ -247,11 +265,10 @@ function registerStudentHandlers(bot) {
         return ctx.reply(`Siz ushbu kod bilan ${MAX_ATTEMPTS} marta urinish huquqingizni ishlatib bo'lgansiz.`);
       }
 
-      const name = studentDisplayName(ctx.from);
       const insertRes = await query(
         `INSERT INTO sessions (topic_id, code, student_tg_id, student_name, tg_profile_name, tg_username, attempt_number, status)
          VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING id`,
-        [topic.id, code, ctx.from.id, name, name, ctx.from.username || null, attemptsUsed + 1]
+        [topic.id, code, ctx.from.id, state.fullName, state.tgProfileName, state.tgUsername, attemptsUsed + 1]
       );
       const sessionId = insertRes.rows[0].id;
       studentStates.delete(ctx.from.id);
@@ -265,7 +282,7 @@ function registerStudentHandlers(bot) {
       return;
     }
 
-    // 2) Aktiv sessiyada javob kutilyapti
+    // 3) Aktiv sessiyada javob kutilyapti
     const activeRes = await query(
       "SELECT * FROM sessions WHERE student_tg_id=$1 AND status='active' ORDER BY id DESC LIMIT 1",
       [ctx.from.id]
@@ -276,7 +293,7 @@ function registerStudentHandlers(bot) {
       return;
     }
 
-    // 3) "Boshlash" tugmasi bosilishini kutayotgan holat
+    // 4) "Boshlash" tugmasi bosilishini kutayotgan holat
     const pendingRes = await query(
       "SELECT * FROM sessions WHERE student_tg_id=$1 AND status='pending' ORDER BY id DESC LIMIT 1",
       [ctx.from.id]
@@ -290,7 +307,7 @@ function registerStudentHandlers(bot) {
       return;
     }
 
-    // 4) Paused holatda (vaqt tugagan) bo'lsa ham eslatma
+    // 5) Paused holatda (vaqt tugagan) bo'lsa ham eslatma
     const pausedRes = await query(
       "SELECT * FROM sessions WHERE student_tg_id=$1 AND status='paused' ORDER BY id DESC LIMIT 1",
       [ctx.from.id]
