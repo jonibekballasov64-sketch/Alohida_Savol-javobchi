@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS questions (
   topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
   order_index INTEGER NOT NULL,
   question TEXT NOT NULL,
-  answer TEXT NOT NULL
+  answer TEXT NOT NULL,
+  explanation TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
