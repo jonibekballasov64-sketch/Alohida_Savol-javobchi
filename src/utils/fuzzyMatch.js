@@ -72,8 +72,15 @@ function normalizeNumbers(s) {
 
 function similarityOk(a, b) {
   if (a === b) return true;
+
   const maxLen = Math.max(a.length, b.length);
   if (maxLen === 0) return true;
+
+  // Bitta harflik/belgili javoblarda (masalan unli tovush "i", "a") faqat
+  // aniq mos kelish qabul qilinadi - aks holda "i" va "a" bir-biriga
+  // "deyarli to'g'ri" deb chalkashtirilib yuboriladi.
+  if (maxLen === 1) return false;
+
   const dist = levenshtein.get(a, b);
   const allowedRatio = maxLen <= 4 ? 0.34 : maxLen <= 8 ? 0.4 : 0.35;
   const allowedDistance = Math.max(1, Math.round(maxLen * allowedRatio));
@@ -84,6 +91,7 @@ function similarityOk(a, b) {
   if (aStripped !== a || bStripped !== b) {
     const maxLen2 = Math.max(aStripped.length, bStripped.length);
     if (maxLen2 === 0) return false;
+    if (maxLen2 === 1) return aStripped === bStripped;
     const dist2 = levenshtein.get(aStripped, bStripped);
     const allowedDistance2 = Math.max(1, Math.round(maxLen2 * allowedRatio));
     if (dist2 <= allowedDistance2) return true;
@@ -92,8 +100,13 @@ function similarityOk(a, b) {
   return false;
 }
 
+// Faqat bog'lovchi so'zlarni chiqarib tashlaydi - bitta harflik so'zlar
+// (masalan unli tovushlar: a, i, o, u, e) SAQLANADI, chunki fonetika
+// savollarida bular mustaqil ma'noli javob bo'lishi mumkin. Ularning
+// solishtirilishi similarityOk() ichidagi maxLen===1 qoidasi bilan
+// nazorat qilinadi (faqat aniq mos kelish).
 function meaningfulWords(normText) {
-  return normText.split(' ').filter((w) => w.length > 1 && !STOPWORDS.has(w));
+  return normText.split(' ').filter((w) => w.length > 0 && !STOPWORDS.has(w));
 }
 
 /**
@@ -111,6 +124,9 @@ function splitVariants(correctRaw) {
 
 /**
  * O'quvchi javobi bilan to'g'ri javobni imloviy xatolarga chidamli solishtiradi.
+ * - Raqamlar so'z shaklida yozilgan bo'lsa ham ("besh" <-> "5") to'g'ri hisoblanadi.
+ * - Bitta harflik javoblarda (masalan "i") faqat aniq mos kelish qabul qilinadi.
+ * - Ko'p so'zli to'g'ri javobda bitta muhim so'zni topsa ham yetarli.
  */
 function isAnswerCorrect(studentRaw, correctRaw) {
   const studentNorm = normalizeNumbers(normalize(studentRaw));
