@@ -192,12 +192,66 @@ function registerStudentHandlers(bot) {
       );
     }
 
+    // Yakunlanmagan (active yoki paused) savol-javob bor-yo'qligini tekshirish
+    const unfinishedRes = await query(
+      `SELECT s.*, t.name AS topic_name
+       FROM sessions s
+       JOIN topics t ON t.id = s.topic_id
+       WHERE s.student_tg_id=$1 AND s.status IN ('active','paused')
+       ORDER BY s.id DESC LIMIT 1`,
+      [ctx.from.id]
+    );
+
+    if (unfinishedRes.rowCount > 0) {
+      const session = unfinishedRes.rows[0];
+      const resumeAction = session.status === 'paused' ? `continue_${session.id}` : `resume_${session.id}`;
+      await ctx.reply(
+        `Sizga *${escapeMd(session.topic_name)}* mavzusidan yakunlanmagan savol-javob bor.\n\n` +
+          `Quyidagi *▶️ Davom ettirish* yoki *✅️ Shu joyida yakunlash* tugmasini bosing:`,
+        {
+          ...MD,
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('▶️ Davom ettirish', resumeAction)],
+            [Markup.button.callback('✅️ Shu joyida yakunlash', `finish_now_${session.id}`)],
+          ]),
+        }
+      );
+      return;
+    }
+
     await ctx.reply(`Assalomu alaykum🖐\n\nMen *Nargiza Olimovnaning* yordamchisiman.`, MD);
     await ctx.reply(
       "Bugun siz bilan maxsus videodars asosida savol-javob qilaman. Buning uchun *6 xonali savol-javob kodini* kiriting. Bu kod guruhga berilgan bo'lishi kerak.\n\n_Hozir faqat 6 ta belgili kod yuboring, ortiqcha narsalar yozmang._",
       MD
     );
     studentStates.set(ctx.from.id, { step: 'awaiting_code' });
+  });
+
+  // Faqat "active" holatdagi sessiyani davom ettirish (joriy savolni qayta yuborish)
+  bot.action(/resume_(\d+)/, async (ctx) => {
+    const sessionId = Number(ctx.match[1]);
+    await ctx.answerCbQuery();
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+
+    const sRes = await query('SELECT * FROM sessions WHERE id=$1', [sessionId]);
+    const session = sRes.rows[0];
+    if (!session) return;
+
+    await sendQuestion(bot, session);
+  });
+
+  // Sessiyani shu joyida (hozirgi natija bilan) yakunlash
+  bot.action(/finish_now_(\d+)/, async (ctx) => {
+    const sessionId = Number(ctx.match[1]);
+    await ctx.answerCbQuery();
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+
+    const sRes = await query('SELECT * FROM sessions WHERE id=$1', [sessionId]);
+    const session = sRes.rows[0];
+    if (!session) return;
+
+    clearTimers(session.id);
+    await finishSession(bot, session);
   });
 
   bot.action(/continue_(\d+)/, async (ctx) => {
