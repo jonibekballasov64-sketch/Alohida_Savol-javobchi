@@ -15,6 +15,14 @@ if (!BOT_TOKEN) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
+// Bot faqat shaxsiy (private) chatda javob beradi - guruh/kanalda umuman yozmaydi
+bot.use((ctx, next) => {
+  if (ctx.chat && ctx.chat.type !== 'private') {
+    return; // guruh/kanal xabarlariga hech qanday javob berilmaydi
+  }
+  return next();
+});
+
 // Admin buyruqlari
 registerAdminReportHandler(bot, isAdmin); // /hisobot_KOD - bot.hears bilan ishlagani uchun oldinroq
 registerAdminRoundReportHandlers(bot, isAdmin); // /joriyhisobot_KOD, /yakunlash_KOD
